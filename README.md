@@ -29,7 +29,7 @@ Assistant add-on with direct filesystem access — no SSH required.
      "mcpServers": {
        "esphome": {
          "type": "http",
-         "url": "http://<your-ha-host>:8098/mcp",
+         "url": "http://<your-ha-host>:8099/mcp",
          "headers": {
            "Authorization": "Bearer ${ESPHOME_MCP_TOKEN}"
          }

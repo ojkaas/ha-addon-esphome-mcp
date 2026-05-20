@@ -46,7 +46,7 @@ auth_token: "my-secret-token"
      "mcpServers": {
        "esphome": {
          "type": "http",
-         "url": "http://<your-ha-host>:8098/mcp",
+         "url": "http://<your-ha-host>:8099/mcp",
          "headers": {
            "Authorization": "Bearer ${ESPHOME_MCP_TOKEN}"
          }
@@ -76,12 +76,12 @@ auth_token: "my-secret-token"
 
 - All requests require a valid Bearer token in the Authorization header.
 - `secrets.yaml` is explicitly rejected in push/pull operations.
-- The add-on exposes port 8098 — ensure your network is trusted or use
+- The add-on exposes port 8099 — ensure your network is trusted or use
   a reverse proxy with TLS.
 
 ## Network
 
-The add-on listens on port **8098** (TCP). Make sure this port is
+The add-on listens on port **8099** (TCP). Make sure this port is
 accessible from your development machine.
 
 ## Long-running builds

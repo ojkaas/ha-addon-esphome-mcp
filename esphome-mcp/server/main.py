@@ -158,7 +158,7 @@ app.add_middleware(BearerAuthMiddleware)
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("MCP_PORT", "8098"))
+    port = int(os.environ.get("MCP_PORT", "8099"))
     log.info("ESPHome MCP Server starting on port %d", port)
     uvicorn.run(
         "server.main:app",

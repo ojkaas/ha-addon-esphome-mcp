@@ -7,7 +7,7 @@ All notable changes to this project will be documented in this file.
 - **Bert Berrevoets** — Project author
 - **Claude Code** — AI-assisted development
 
-## [1.2.0] - 2026-05-20 (glibc fork)
+## [1.1.0] - 2026-05-20
 
 ### Changed
 
@@ -18,7 +18,9 @@ All notable changes to this project will be documented in this file.
 - Replaced bashio/`with-contenv` startup with a plain `/data/options.json`
   read; cleared the base image's inherited `ENTRYPOINT` and `HEALTHCHECK`
   (the dashboard healthcheck caused a ~60s restart loop).
-- Default port moved to **8098** so the fork can run beside the original.
+- `run.sh` sets `PLATFORMIO_CORE_DIR` to the shared
+  `/config/esphome/.esphome/.platformio` so toolchains are reused across
+  builds and shared with the ESPHome Device Builder add-on.
 
 ### Added
 

@@ -31,9 +31,6 @@ fi
 export ESPHOME_MCP_AUTH_TOKEN="$AUTH_TOKEN"
 export ESPHOME_DIR="/config/esphome"
 
-# Run on a non-default port so this fork can coexist with the original add-on.
-export MCP_PORT="${MCP_PORT:-8098}"
-
 # Reuse the PlatformIO toolchains/cache the official ESPHome Device Builder
 # add-on already downloaded under /config, avoiding a second download.
 export PLATFORMIO_CORE_DIR="/config/esphome/.esphome/.platformio"

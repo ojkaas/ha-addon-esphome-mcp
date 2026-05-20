@@ -29,7 +29,7 @@ instead of SSH, getting direct access to ESPHome CLI and the
 
 - **Auth**: Bearer token in `Authorization` header; auto-generated if not
   configured, persisted to `/data/auth_token`
-- **Transport**: Streamable HTTP on port 8098 at `/mcp`
+- **Transport**: Streamable HTTP on port 8099 at `/mcp`
 - **Secrets**: `secrets.yaml` is explicitly rejected in push/pull tools
 - **ESPHome**: Provided by the official `ghcr.io/esphome/esphome`
   (Debian/glibc) base image — required so the ESP cross-toolchains can run
@@ -44,7 +44,7 @@ The add-on is built by HA Supervisor when installed. For local testing:
 ```bash
 cd esphome-mcp
 docker build --build-arg BUILD_FROM=ghcr.io/esphome/esphome:2026.4.5 -t esphome-mcp .
-docker run -p 8098:8098 -v /path/to/config:/config -e ESPHOME_MCP_AUTH_TOKEN=test esphome-mcp
+docker run -p 8099:8099 -v /path/to/config:/config -e ESPHOME_MCP_AUTH_TOKEN=test esphome-mcp
 ```
 
 ## Deployment
