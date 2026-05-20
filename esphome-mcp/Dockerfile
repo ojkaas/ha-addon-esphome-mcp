@@ -16,6 +16,10 @@ RUN chmod a+x /opt/run.sh
 
 WORKDIR /opt
 
-# Clear the esphome image's ENTRYPOINT so CMD runs our launcher directly.
+# The official esphome image ships an ENTRYPOINT and a HEALTHCHECK that probe
+# the ESPHome dashboard. We run the MCP server instead, so clear both —
+# otherwise the failing dashboard healthcheck makes Supervisor restart the
+# add-on on a ~60s loop.
 ENTRYPOINT []
+HEALTHCHECK NONE
 CMD ["/opt/run.sh"]
