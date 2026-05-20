@@ -1,18 +1,19 @@
-name: ESPHome MCP Server
-version: 1.0.0
+name: ESPHome MCP Server (glibc fork)
+version: 1.1.0
 slug: esphome-mcp
 description: >-
   MCP (Model Context Protocol) server exposing ESPHome operations as tools
   for Claude Code. Runs ESPHome commands locally on Home Assistant with
-  direct filesystem access — no SSH required.
-url: https://github.com/bberrevoets/ha-addon-esphome-mcp
+  direct filesystem access — no SSH required. Built on the official ESPHome
+  (Debian/glibc) image so device compilation/flashing works.
+url: https://github.com/ojkaas/ha-addon-esphome-mcp
 arch:
   - aarch64
   - amd64
 ports:
-  8099/tcp: 8099
+  8098/tcp: 8098
 ports_description:
-  8099/tcp: MCP Streamable HTTP endpoint
+  8098/tcp: MCP Streamable HTTP endpoint
 map:
   - config:rw
 options:
