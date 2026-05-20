@@ -50,6 +50,10 @@ def esphome_validate(device: str) -> str:
 def esphome_compile(device: str) -> str:
     """Compile ESPHome firmware for a device.
 
+    The build runs in the background. If it finishes quickly the full output
+    is returned inline; if it takes longer than the sync window, a pollable
+    handle is returned — check progress with esphome_build_status(device).
+
     Args:
         device: Device name (e.g. 'statusdisplay') or YAML filename.
     """
@@ -60,10 +64,26 @@ def esphome_compile(device: str) -> str:
 def esphome_flash(device: str) -> str:
     """OTA flash a device.
 
+    Like esphome_compile, this runs in the background and may return a
+    pollable handle for long uploads — check esphome_build_status(device).
+
     Args:
         device: Device name (e.g. 'statusdisplay') or YAML filename.
     """
     return tools.flash(device)
+
+
+@mcp.tool()
+def esphome_build_status(device: str) -> str:
+    """Get the status/output of the latest background compile or flash.
+
+    Use this to poll a build that esphome_compile / esphome_flash reported as
+    still running. Returns running progress (tail) or the final result.
+
+    Args:
+        device: Device name (e.g. 'statusdisplay') or YAML filename.
+    """
+    return tools.build_status(device)
 
 
 @mcp.tool()
@@ -138,7 +158,7 @@ app.add_middleware(BearerAuthMiddleware)
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("MCP_PORT", "8099"))
+    port = int(os.environ.get("MCP_PORT", "8098"))
     log.info("ESPHome MCP Server starting on port %d", port)
     uvicorn.run(
         "server.main:app",

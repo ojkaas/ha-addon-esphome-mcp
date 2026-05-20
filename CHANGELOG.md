@@ -7,6 +7,27 @@ All notable changes to this project will be documented in this file.
 - **Bert Berrevoets** — Project author
 - **Claude Code** — AI-assisted development
 
+## [1.2.0] - 2026-05-20 (glibc fork)
+
+### Changed
+
+- Rebased the image on the official `ghcr.io/esphome/esphome` (Debian/glibc)
+  image. The previous Alpine/musl base could not run ESPHome's glibc ESP
+  cross-toolchains (`xtensa-lx106-elf-g++`), so every compile failed with
+  `not found` (exit 127). Compiles/flashes now work.
+- Replaced bashio/`with-contenv` startup with a plain `/data/options.json`
+  read; cleared the base image's inherited `ENTRYPOINT` and `HEALTHCHECK`
+  (the dashboard healthcheck caused a ~60s restart loop).
+- Default port moved to **8098** so the fork can run beside the original.
+
+### Added
+
+- Background builds: `esphome_compile` / `esphome_flash` run in a thread and
+  return a pollable handle for long builds, with new `esphome_build_status`
+  to check progress — avoids MCP request timeouts on multi-minute compiles.
+- `esphome_flash` forces OTA (`--device <name>.local`) so it no longer hangs
+  on the interactive serial/OTA chooser when USB adapters are present.
+
 ## [1.0.0] - 2026-03-17
 
 ### Added

@@ -46,7 +46,7 @@ auth_token: "my-secret-token"
      "mcpServers": {
        "esphome": {
          "type": "http",
-         "url": "http://<your-ha-host>:8099/mcp",
+         "url": "http://<your-ha-host>:8098/mcp",
          "headers": {
            "Authorization": "Bearer ${ESPHOME_MCP_TOKEN}"
          }
@@ -63,8 +63,9 @@ auth_token: "my-secret-token"
 | ---- | ----------- |
 | `esphome_list_devices` | List device configs with names |
 | `esphome_validate` | Validate a device YAML config |
-| `esphome_compile` | Compile firmware for a device |
-| `esphome_flash` | OTA flash a device |
+| `esphome_compile` | Compile firmware (background; returns inline or a poll handle) |
+| `esphome_flash` | OTA flash a device (background; returns inline or a poll handle) |
+| `esphome_build_status` | Poll the latest background compile/flash for a device |
 | `esphome_logs` | Get recent device logs (snapshot) |
 | `esphome_push_files` | Write YAML files to the config directory |
 | `esphome_pull_files` | Read YAML files from the config directory |
@@ -75,10 +76,18 @@ auth_token: "my-secret-token"
 
 - All requests require a valid Bearer token in the Authorization header.
 - `secrets.yaml` is explicitly rejected in push/pull operations.
-- The add-on exposes port 8099 — ensure your network is trusted or use
+- The add-on exposes port 8098 — ensure your network is trusted or use
   a reverse proxy with TLS.
 
 ## Network
 
-The add-on listens on port **8099** (TCP). Make sure this port is
+The add-on listens on port **8098** (TCP). Make sure this port is
 accessible from your development machine.
+
+## Long-running builds
+
+Compiles (and the compile step of a flash) can take several minutes,
+especially the first build of a device. These run in the background: if a
+build finishes within ~45s the full output is returned immediately;
+otherwise the tool returns a handle and you poll `esphome_build_status`
+with the device name until it reports `done` or `failed`.
