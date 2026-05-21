@@ -7,6 +7,7 @@ import base64
 import glob
 import logging
 import os
+import re
 import subprocess
 import threading
 import time
@@ -174,6 +175,23 @@ def _await_or_handle(key: str, job: dict, label: str) -> str:
     return output
 
 
+def _resolve_substitutions(value: str, subs: dict) -> str:
+    """Resolve ${var} / $var references in a string against the subs map.
+
+    Unknown references are left untouched (so the caller's '$' guards still
+    fire for genuinely unresolved names).
+    """
+    if not isinstance(value, str) or "$" not in value:
+        return value
+
+    def repl(match):
+        key = match.group(1) or match.group(2)
+        replacement = subs.get(key)
+        return str(replacement) if replacement is not None else match.group(0)
+
+    return re.sub(r"\$\{(\w+)\}|\$(\w+)", repl, value)
+
+
 def _parse_device_info(yaml_path: str) -> dict:
     """Parse basic device info from a YAML file."""
     try:
@@ -185,12 +203,27 @@ def _parse_device_info(yaml_path: str) -> dict:
                 return f"!secret {loader.construct_scalar(node)}"
 
             SecretLoader.add_constructor("!secret", secret_constructor)
-            data = yaml.load(f, Loader=SecretLoader)
 
-        esphome_section = data.get("esphome", {})
+            # ESPHome configs carry many custom tags (!lambda, !include,
+            # !extend, !remove, ...). We only need scalar metadata here, so
+            # map any unrecognised tag to None instead of crashing the load.
+            def _ignore_unknown(loader, tag_suffix, node):
+                return None
+
+            SecretLoader.add_multi_constructor("!", _ignore_unknown)
+            data = yaml.load(f, Loader=SecretLoader) or {}
+
+        subs = data.get("substitutions", {}) or {}
+        esphome_section = data.get("esphome", {}) or {}
+        name = _resolve_substitutions(
+            esphome_section.get("name", "unknown"), subs
+        )
+        friendly_name = _resolve_substitutions(
+            esphome_section.get("friendly_name", ""), subs
+        )
         return {
-            "name": esphome_section.get("name", "unknown"),
-            "friendly_name": esphome_section.get("friendly_name", ""),
+            "name": name,
+            "friendly_name": friendly_name,
             "file": os.path.basename(yaml_path),
         }
     except Exception as e:
