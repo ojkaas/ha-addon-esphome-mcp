@@ -338,10 +338,14 @@ def logs(device: str, num_lines: int = 50) -> str:
     yaml_path = _device_yaml_path(device)
     if not os.path.isfile(yaml_path):
         return f"Device config not found: {yaml_path}"
-    output = _run(
-        ["timeout", "15", ESPHOME_BIN, "logs", yaml_path],
-        timeout=30,
-    )
+    # Force OTA target so `esphome logs` doesn't prompt for a log host when USB
+    # serial adapters are also present (interactive prompt -> EOFError under
+    # MCP, no stdin). Same approach as flash().
+    cmd = ["timeout", "15", ESPHOME_BIN, "logs", yaml_path]
+    name = _parse_device_info(yaml_path).get("name", "")
+    if name and name not in ("unknown", "error") and "$" not in name:
+        cmd += ["--device", f"{name}.local"]
+    output = _run(cmd, timeout=30)
     lines = output.splitlines()
     if len(lines) > num_lines:
         lines = lines[-num_lines:]
