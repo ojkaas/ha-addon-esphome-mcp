@@ -1,5 +1,5 @@
 name: ESPHome MCP Server
-version: 1.8.1
+version: 1.8.2
 slug: esphome-mcp
 description: >-
   MCP (Model Context Protocol) server exposing ESPHome operations as tools for
@@ -38,9 +38,12 @@ init: false
 # gets 403. This mirrors how HA core's ESPHome integration reaches it.
 host_network: true
 ingress: false
-# hassio_api lets the add-on query the Supervisor for the ESPHome Device Builder
-# dashboard's ingress port, so dashboard_url can be auto-discovered (see
-# server/discover.py) instead of hard-coded. The port is install-specific and
-# changes on reinstall, so there is no correct fixed default.
+# hassio_api + hassio_role: manager let the add-on query the Supervisor for the
+# ESPHome Device Builder dashboard's ingress port, so dashboard_url can be
+# auto-discovered (see server/discover.py) instead of hard-coded. The port is
+# install-specific and changes on reinstall, so there is no correct fixed
+# default. `manager` is required to read other add-ons' info via /addons; the
+# `default` role cannot, which makes discovery fall back to :6052.
 hassio_api: true
+hassio_role: manager
 panel_icon: mdi:chip

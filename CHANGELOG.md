@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.8.2] - 2026-08-12
+
+### Fixed
+
+- **Dashboard auto-discovery now works.** It requires reading other add-ons'
+  info via the Supervisor `/addons` API, which needs `hassio_role: manager`;
+  the add-on only had the default role, so discovery silently fell back to
+  `http://127.0.0.1:6052`. Added `hassio_role: manager`.
+
 ## [1.8.1] - 2026-08-12
 
 ### Fixed
