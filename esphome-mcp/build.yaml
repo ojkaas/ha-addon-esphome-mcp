@@ -1,7 +1,11 @@
-# Standard HA Alpine base (trusted registry — Supervisor rejects arbitrary
-# ones like docker.io/library/python). No ESPHome toolchain is bundled; all
-# builds are delegated to the ESPHome Device Builder dashboard. Python/pip/bash
-# are added in the Dockerfile.
+# Base on the official ESPHome image (Debian/glibc, trusted registry). It
+# ships esphome + PlatformIO with working ESP toolchains, which the *bundled*
+# build backend uses as a fallback when the ESPHome Device Builder dashboard is
+# unavailable. The default `auto`/`dashboard` backend still delegates builds to
+# that dashboard and never touches this toolchain.
+#
+# This pin only governs the bundled fallback and the on-image toolchain; the
+# `esphome_version` add-on option can override the esphome version at runtime.
 build_from:
-  aarch64: ghcr.io/home-assistant/aarch64-base:latest
-  amd64: ghcr.io/home-assistant/amd64-base:latest
+  aarch64: ghcr.io/esphome/esphome:2026.7.4
+  amd64: ghcr.io/esphome/esphome:2026.7.4

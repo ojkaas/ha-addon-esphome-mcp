@@ -1,18 +1,11 @@
 ARG BUILD_FROM
-# The MCP server no longer compiles firmware itself — it delegates every
-# build/flash/validate/logs call to the ESPHome Device Builder dashboard
-# running in the official ESPHome add-on. So there's no need for the heavy
-# ESPHome (Debian/glibc + ESP toolchains + PlatformIO) base image or its
-# pinned esphome version.
-#
-# HA Supervisor only accepts base images from trusted registries, so we build
-# on the standard HA Alpine base (set in build.yaml) and add just Python + pip
-# + bash. Pure-Python + musllinux wheels (aiohttp, pydantic-core) install
-# without a compiler.
 FROM ${BUILD_FROM}
 
-RUN apk add --no-cache python3 py3-pip bash
-
+# Base image (ghcr.io/esphome/esphome) is Debian/glibc and already provides
+# esphome + PlatformIO with working ESP toolchains. The MCP server delegates
+# builds to the ESPHome Device Builder dashboard by default; this bundled
+# toolchain is the fallback used when the dashboard is unavailable (or when
+# build_backend=bundled). We only add the server's Python dependencies on top.
 COPY requirements.txt /tmp/
 RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt
@@ -24,5 +17,24 @@ COPY run.sh /opt/
 RUN chmod a+x /opt/run.sh
 
 WORKDIR /opt
+
+# The official esphome image ships an ENTRYPOINT and a HEALTHCHECK that probe
+# the ESPHome dashboard. We run the MCP server instead, so both must go —
+# otherwise the failing dashboard healthcheck makes Supervisor restart the
+# add-on on a ~60s loop.
+ENTRYPOINT []
+
+# The healthcheck must be a real, passing probe — NOT `HEALTHCHECK NONE`.
+# Supervisor derives the add-on state from `docker inspect .Config.Healthcheck`,
+# and per the Docker image spec `NONE` is encoded as a populated field
+# ({"Test": ["NONE"]}), not an absent one. Supervisor therefore reads "this
+# container has a healthcheck" and parks the add-on in `startup` until Docker
+# emits a health event — which a disabled healthcheck never does, so the UI
+# shows "Starting" forever even though the server is serving fine. The probe
+# hits the unauthenticated /health route (see server/main.py). Fix originally
+# by scadinot.
+ENV MCP_PORT=8098
+HEALTHCHECK --interval=10s --timeout=5s --start-period=60s --retries=3 \
+    CMD python3 -c "import os,urllib.request;urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('MCP_PORT','8098')+'/health',timeout=4)"
 
 CMD ["/opt/run.sh"]
