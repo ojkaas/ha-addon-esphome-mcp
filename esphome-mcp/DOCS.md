@@ -1,11 +1,12 @@
 # ESPHome MCP Server
 
 This add-on runs an MCP (Model Context Protocol) server that exposes
-ESPHome operations as tools for Claude Code. It delegates builds, flashes,
-validation and logs to the ESPHome Device Builder dashboard (the official
-ESPHome add-on) so they always run against **current** ESPHome, and keeps
-native filesystem access to `/config/esphome/` for config/font transfer —
-no SSH tunneling required.
+ESPHome operations as tools for Claude Code. By default it delegates builds,
+flashes, validation and logs to the ESPHome Device Builder dashboard (the
+official ESPHome add-on) so they run against **current** ESPHome, and falls
+back to a **bundled** esphome toolchain when the dashboard is unavailable (see
+[Build backends](#build-backends)). It keeps native filesystem access to
+`/config/esphome/` for config/font transfer — no SSH tunneling required.
 
 ## Architecture
 
@@ -23,8 +24,10 @@ HA Add-on (MCP Server, host_network)
 /config/esphome/  (shared mount: push/pull YAML + fonts)
 ```
 
-Because compilation happens in the ESPHome add-on's container, this add-on
-ships **no** ESPHome toolchain and is not tied to any esphome version.
+In the default (`auto`) and `dashboard` modes, compilation happens in the
+ESPHome add-on's container using its current esphome. The add-on also bundles
+its own esphome toolchain (from the Debian/glibc base image) as a fallback for
+when the dashboard is unreachable — see [Build backends](#build-backends).
 
 ## Configuration
 
@@ -62,11 +65,58 @@ the ESPHome add-on).
 Only needed if the dashboard is protected with a password. Leave empty for
 the default (open) HA add-on behind Ingress.
 
+### build_backend
+
+Which backend runs `validate` / `compile` / `flash` / `logs` / `list`:
+
+- **`auto`** (default) — probe the dashboard; delegate when reachable, else use
+  the bundled esphome toolchain.
+- **`dashboard`** — always delegate; returns a clear error if the dashboard is
+  down. No local toolchain is used.
+- **`bundled`** — always use the add-on's own esphome toolchain.
+
+File/font push/pull are unaffected — they always use direct filesystem access.
+See [Build backends](#build-backends).
+
+```yaml
+build_backend: "auto"
+```
+
+### esphome_version
+
+Pins the esphome version used by the **bundled** fallback (e.g. `2026.7.4`).
+Leave empty to use the version baked into the image. This has no effect in
+`dashboard` mode, where the version is whatever the dashboard runs. When set,
+the add-on installs that version at startup.
+
+```yaml
+esphome_version: ""
+```
+
+## Build backends
+
+Build/flash/validate/logs/list can run two ways:
+
+1. **Dashboard delegation** (default) — proxied to the official ESPHome Device
+   Builder add-on over its HTTP/WS API, so builds use that add-on's current
+   esphome and share its build cache. This requires the ESPHome **Device
+   Builder** add-on to be installed and running, with `dashboard_url` set to its
+   ingress port.
+2. **Bundled toolchain** (fallback) — the add-on's own esphome (from the
+   Debian/glibc base image) compiles locally. Used automatically in `auto` mode
+   when the dashboard is unreachable, or always in `bundled` mode. It reuses the
+   dashboard add-on's PlatformIO cache (`/config/esphome/.esphome/.platformio`)
+   so it does not re-download toolchains.
+
+Carrying the bundled toolchain makes the image large; that is the cost of
+offline-capable builds. Set `build_backend: dashboard` if you never want the
+fallback.
+
 ## Setup
 
 1. Add this repository as a custom add-on repository in Home Assistant:
    **Settings > Add-ons > Add-on Store > ... > Repositories**
-   Enter: `https://github.com/dmitrii-galantsev/ha-addon-esphome-mcp`
+   Enter: `https://github.com/ojkaas/ha-addon-esphome-mcp`
 
 2. Install the **ESPHome MCP Server** add-on and start it.
 
@@ -143,7 +193,10 @@ file is large.
 
 ## Security
 
-- All requests require a valid Bearer token in the Authorization header.
+- All requests require a valid Bearer token in the Authorization header. The
+  one exception is `GET /health`, an unauthenticated liveness probe that returns
+  `ok` and exposes no data — it backs the container healthcheck (and therefore
+  Home Assistant's add-on status).
 - `secrets.yaml` is explicitly rejected in push/pull operations.
 - The add-on exposes port 8098 — ensure your network is trusted or use
   a reverse proxy with TLS.

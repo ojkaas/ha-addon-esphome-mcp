@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.7.0] - 2026-08-12
+
+### Added
+
+- **Three build backends via the `build_backend` option** (`auto` | `dashboard`
+  | `bundled`). `auto` (default) delegates builds to the ESPHome Device Builder
+  dashboard when it is reachable and **falls back to a bundled esphome
+  toolchain** otherwise; `dashboard` always delegates; `bundled` always uses the
+  local toolchain. File/font push/pull remain direct-filesystem and
+  backend-independent.
+- **`esphome_version` option** to pin the esphome version used by the bundled
+  fallback (reconciled at startup; no effect in `dashboard` mode).
+
+### Changed
+
+- Base image is once again the official ESPHome image (Debian/glibc) so the
+  bundled fallback has a working ESP toolchain. The bundled path reuses the
+  dashboard add-on's PlatformIO cache via `PLATFORMIO_CORE_DIR`.
+- Restored the `/health` liveness probe + real container `HEALTHCHECK` (fix for
+  the add-on hanging in "Starting"; originally by scadinot), needed again with
+  the ESPHome base image.
+
+### Attribution
+
+- This fork is maintained by **ojkaas**, building on the original by
+  **bberrevoets**, the dashboard-delegation architecture by
+  **dmitrii-galantsev**, and the healthcheck fix by **scadinot**.
+
 ## [1.6.1] - 2026-07-25
 
 ### Changed
