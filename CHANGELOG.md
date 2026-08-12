@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.8.1] - 2026-08-12
+
+### Fixed
+
+- **Pin `mcp[cli]` below 2.0.** mcp 2.x removed `mcp.server.fastmcp`, which the
+  server imports, so a fresh build crashed on startup with
+  `ModuleNotFoundError: No module named 'mcp.server.fastmcp'`. The requirement
+  was unbounded (`>=1.9.0`); it is now `>=1.9.0,<2`.
+
 ## [1.8.0] - 2026-08-12
 
 ### Added
