@@ -6,6 +6,8 @@ import os
 
 import uvicorn
 from mcp.server.fastmcp import FastMCP
+from starlette.responses import PlainTextResponse
+from starlette.routing import Route
 
 from . import tools
 from .auth import BearerAuthMiddleware
@@ -153,7 +155,19 @@ def esphome_pull_fonts(filenames: list[str] | None = None) -> str:
 # ---------------------------------------------------------------------------
 # ASGI app with auth middleware
 # ---------------------------------------------------------------------------
+async def health(_request):
+    """Liveness probe for the container HEALTHCHECK (exempt from auth).
+
+    Home Assistant Supervisor holds an add-on in the `startup` state until
+    Docker reports a health status for the container, so the image has to ship
+    a healthcheck that actually runs and passes. See the Dockerfile for why
+    `HEALTHCHECK NONE` is not a valid alternative here.
+    """
+    return PlainTextResponse("ok")
+
+
 app = mcp.streamable_http_app()
+app.router.routes.append(Route("/health", health, methods=["GET"]))
 app.add_middleware(BearerAuthMiddleware)
 
 
