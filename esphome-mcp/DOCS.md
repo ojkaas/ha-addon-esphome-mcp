@@ -75,6 +75,9 @@ auth_token: "my-secret-token"
 ## Security
 
 - All requests require a valid Bearer token in the Authorization header.
+  The one exception is `GET /health`, an unauthenticated liveness probe
+  that returns `ok` and exposes no data — it is what the container
+  healthcheck (and therefore Home Assistant's add-on status) uses.
 - `secrets.yaml` is explicitly rejected in push/pull operations.
 - The add-on exposes port 8098 — ensure your network is trusted or use
   a reverse proxy with TLS.

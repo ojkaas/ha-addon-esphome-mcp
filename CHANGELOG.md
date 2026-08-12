@@ -7,6 +7,27 @@ All notable changes to this project will be documented in this file.
 - **Bert Berrevoets** — Project author
 - **Claude Code** — AI-assisted development
 
+## [1.2.5] - 2026-08-12
+
+### Fixed
+
+- The add-on stayed on **"Starting"** in the Home Assistant UI forever, even
+  though the MCP server was up and answering requests. Supervisor derives the
+  add-on state from `docker inspect .Config.Healthcheck`, and per the Docker
+  image spec `HEALTHCHECK NONE` is encoded as a *populated* field
+  (`{"Test": ["NONE"]}`) rather than an absent one. Supervisor therefore read
+  "this container has a healthcheck" and held the add-on in `startup` waiting
+  for a Docker health event that a disabled healthcheck never emits.
+  `HEALTHCHECK NONE` is replaced by a real probe against the MCP server, so
+  the add-on now reaches "Started" (and the watchdog toggle becomes
+  meaningful).
+
+### Added
+
+- `GET /health` — unauthenticated liveness endpoint returning `ok`, used by
+  the container healthcheck. The auth middleware already exempted this path;
+  the route it pointed at simply did not exist until now.
+
 ## [1.2.0] - 2026-05-20 (glibc fork)
 
 ### Changed
