@@ -201,6 +201,12 @@ file is large.
   one exception is `GET /health`, an unauthenticated liveness probe that returns
   `ok` and exposes no data — it backs the container healthcheck (and therefore
   Home Assistant's add-on status).
+- The token is compared in constant time, so a wrong token cannot be recovered
+  byte by byte from response timing.
+- If no token is configured the server refuses every request with 503 rather
+  than serving the tools unauthenticated. `run.sh` always supplies one (it
+  generates and persists a token when the option is blank), so this only
+  affects running the container outside that entry point.
 - `secrets.yaml` is explicitly rejected in push/pull operations.
 - The add-on exposes port 8098 — ensure your network is trusted or use
   a reverse proxy with TLS.

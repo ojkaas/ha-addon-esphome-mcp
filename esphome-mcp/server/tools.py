@@ -12,6 +12,7 @@ shared Home Assistant filesystem (``/config/esphome``).
 
 import asyncio
 import base64
+import collections
 import concurrent.futures
 import glob
 import logging
@@ -37,6 +38,12 @@ FLASH_TIMEOUT = 900
 # install = compile + flash, so it needs the compile budget plus the upload
 # budget rather than either one alone.
 INSTALL_TIMEOUT = COMPILE_TIMEOUT + FLASH_TIMEOUT
+
+# Upper bound on retained output lines per build. A build that loops or spews
+# progress would otherwise grow this list without limit for the lifetime of the
+# process. The tail is what diagnoses a failure, so keep the most recent lines
+# and report how many were dropped.
+MAX_BUILD_LINES = 5000
 
 # Background build registry, keyed by device YAML filename.
 _BUILDS: dict[str, dict] = {}
@@ -90,12 +97,29 @@ def _run_async(coro):
 # the MCP request timeout. The dashboard also queues the job server-side, so
 # it survives even if we stop polling.
 # ---------------------------------------------------------------------------
-def _build_worker(key: str, kind: str, configuration: str, timeout: int) -> None:
-    job = _BUILDS[key]
+def _append_line(job: dict, line: str) -> None:
+    """Record one output line. Caller must hold ``_BUILDS_LOCK``."""
+    lines = job["lines"]
+    if len(lines) == lines.maxlen:
+        job["dropped"] += 1
+    lines.append(line)
 
+
+def _render_lines(job: dict) -> str:
+    """Join a job's retained output. Caller must hold ``_BUILDS_LOCK``."""
+    body = "\n".join(job["lines"])
+    if not job["dropped"]:
+        return body
+    return (
+        f"[... {job['dropped']} earlier line(s) dropped, "
+        f"output capped at {MAX_BUILD_LINES} lines ...]\n{body}"
+    )
+
+
+def _build_worker(job: dict, kind: str, configuration: str, timeout: int) -> None:
     def on_line(line: str) -> None:
         with _BUILDS_LOCK:
-            job["lines"].append(backend.strip_ansi(line))
+            _append_line(job, backend.strip_ansi(line))
 
     async def _compile() -> int:
         return await backend.compile(configuration, on_line)
@@ -134,29 +158,51 @@ def _build_worker(key: str, kind: str, configuration: str, timeout: int) -> None
         job["status"] = "done" if rc == 0 else "failed"
 
 
-def _start_build(key: str, kind: str, configuration: str, timeout: int) -> dict:
-    """Start (or reuse a running) background build for ``key``."""
+def _start_build(
+    key: str, kind: str, configuration: str, timeout: int
+) -> tuple[dict, str | None]:
+    """Start a background build for ``key``, or reuse the running one.
+
+    Returns ``(job, conflict)``; ``conflict`` is a message to hand back to the
+    caller instead of the job when the request cannot be served.
+
+    Reuse is only correct when the running job is the SAME operation. The
+    registry is keyed by configuration alone so ``build_status`` can find a
+    device's build from its name, which means compile/flash/install all collide
+    on one key. Handing back a different operation's job would report a running
+    compile as though it were the flash that was asked for — and no flash would
+    ever happen. Refuse that case explicitly.
+    """
     with _BUILDS_LOCK:
         job = _BUILDS.get(key)
         if job and job["status"] == "running":
-            return job
+            if job["kind"] == kind:
+                return job, None
+            return job, (
+                f"Cannot start {kind} for {key}: a {job['kind']} is already "
+                f"running for this device. Poll it with "
+                f"esphome_build_status(device='{key}'), then retry once it "
+                f"finishes."
+            )
         job = {
             "status": "running",
-            "lines": [],
+            "kind": kind,
+            "lines": collections.deque(maxlen=MAX_BUILD_LINES),
+            "dropped": 0,
             "returncode": None,
             "started": time.time(),
             "finished": None,
         }
         _BUILDS[key] = job
     threading.Thread(
-        target=_build_worker, args=(key, kind, configuration, timeout), daemon=True
+        target=_build_worker, args=(job, kind, configuration, timeout), daemon=True
     ).start()
-    return job
+    return job, None
 
 
 def _job_snapshot(job: dict) -> tuple[str, str, int | None]:
     with _BUILDS_LOCK:
-        return job["status"], "\n".join(job["lines"]), job["returncode"]
+        return job["status"], _render_lines(job), job["returncode"]
 
 
 def _await_or_handle(key: str, job: dict, label: str) -> str:
@@ -220,28 +266,29 @@ def validate(device: str) -> str:
     return f"Validation FAILED for {configuration}:\n\n{message}"
 
 
-def compile_device(device: str) -> str:
-    """Compile ESPHome firmware for a device (dashboard build, backgrounded)."""
+def _run_build(device: str, kind: str, timeout: int, label: str) -> str:
+    """Start (or join) a background build and return output or a poll handle."""
     configuration = _resolve_device(device)
     key = configuration
-    job = _start_build(key, "compile", configuration, COMPILE_TIMEOUT)
-    return _await_or_handle(key, job, "Compile")
+    job, conflict = _start_build(key, kind, configuration, timeout)
+    if conflict:
+        return conflict
+    return _await_or_handle(key, job, label)
+
+
+def compile_device(device: str) -> str:
+    """Compile ESPHome firmware for a device (dashboard build, backgrounded)."""
+    return _run_build(device, "compile", COMPILE_TIMEOUT, "Compile")
 
 
 def flash(device: str) -> str:
     """OTA flash the LAST-COMPILED firmware (does NOT rebuild first)."""
-    configuration = _resolve_device(device)
-    key = configuration
-    job = _start_build(key, "flash", configuration, FLASH_TIMEOUT)
-    return _await_or_handle(key, job, "Flash")
+    return _run_build(device, "flash", FLASH_TIMEOUT, "Flash")
 
 
 def install(device: str) -> str:
     """Compile from source then OTA flash — the full deploy of current YAML."""
-    configuration = _resolve_device(device)
-    key = configuration
-    job = _start_build(key, "install", configuration, INSTALL_TIMEOUT)
-    return _await_or_handle(key, job, "Install")
+    return _run_build(device, "install", INSTALL_TIMEOUT, "Install")
 
 
 def build_status(device: str) -> str:
@@ -252,7 +299,8 @@ def build_status(device: str) -> str:
         if job is None:
             return f"No build found for '{key}'. Start one with esphome_install."
         status = job["status"]
-        output = "\n".join(job["lines"])
+        kind = job["kind"]
+        output = _render_lines(job)
         rc = job["returncode"]
         started = job["started"]
         finished = job["finished"]
@@ -260,10 +308,13 @@ def build_status(device: str) -> str:
     if status == "running":
         elapsed = int(time.time() - started)
         tail = "\n".join(output.splitlines()[-30:])
-        return f"Build running ({elapsed}s elapsed).\n\n--- output (tail) ---\n{tail}"
+        return (
+            f"{kind.capitalize()} running ({elapsed}s elapsed).\n\n"
+            f"--- output (tail) ---\n{tail}"
+        )
 
     duration = int((finished or time.time()) - started)
-    return f"Build {status} (exit {rc}, took {duration}s):\n{output}"
+    return f"{kind.capitalize()} {status} (exit {rc}, took {duration}s):\n{output}"
 
 
 def logs(device: str, num_lines: int = 50) -> str:

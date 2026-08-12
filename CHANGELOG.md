@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.8.3] - 2026-08-12
+
+### Fixed
+
+- **`flash` / `install` could silently return a running `compile`'s job.** The
+  build registry is keyed by configuration alone, so all three operations
+  collide on one key, and `_start_build` reused any running job regardless of
+  kind. Asking for a flash while a compile ran therefore reported the compile's
+  progress labelled "Flash" — and no flash ever happened. A mismatched kind is
+  now refused with a message pointing at `esphome_build_status`, and each job
+  records its kind (also surfaced in `build_status` output).
+- **Auth token compared in constant time.** `auth.py` used `!=`, whose early
+  exit leaks the position of the first mismatching byte; it now uses
+  `hmac.compare_digest`. Tokens are compared as bytes so a non-ASCII configured
+  token yields a clean 403 instead of a `TypeError` (500).
+- **Empty `ESPHOME_MCP_AUTH_TOKEN` now fails closed.** It previously served
+  every request unauthenticated. `run.sh` always exports a token, so an empty
+  value means the server was started outside that path — with `/config` mapped
+  read-write, falling open exposed filesystem access to anyone who could reach
+  the port. Requests now get 503 and an error is logged. `/health` is still
+  served, so the container healthcheck keeps working.
+- **Healthcheck access logs no longer flood the add-on log.** The probe hits
+  `/health` every 10s, which uvicorn logged as ~8600 access lines a day,
+  burying real activity. Those lines are filtered out; everything else is
+  logged as before.
+- **Build output no longer grows without bound.** `job["lines"]` was an
+  unbounded list held for the process lifetime. It is now capped at
+  `MAX_BUILD_LINES` (5000) most-recent lines, and the rendered output states
+  how many earlier lines were dropped rather than silently truncating.
+- **Fixed a data race on the build registry.** `_build_worker` read
+  `_BUILDS[key]` outside `_BUILDS_LOCK`; it now receives the job object
+  directly from `_start_build`.
+
+### Added
+
+- `tests/test_builds.py` and `tests/test_auth.py` covering the above.
+
 ## [1.8.2] - 2026-08-12
 
 ### Fixed

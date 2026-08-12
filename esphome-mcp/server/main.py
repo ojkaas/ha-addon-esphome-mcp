@@ -217,6 +217,25 @@ async def health(_request):
     return PlainTextResponse("ok")
 
 
+class _SuppressHealthAccessLog(logging.Filter):
+    """Drop uvicorn access lines for the healthcheck probe.
+
+    The container HEALTHCHECK polls /health every 10s, so leaving these in
+    buries real activity under ~8600 access lines a day in the add-on log.
+    Uvicorn passes the request as args (client, method, path, version, status);
+    fall back to a substring test if that shape ever changes, so an unexpected
+    record is kept rather than silently swallowed.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) >= 3:
+            return args[2] != "/health"
+        return "/health" not in record.getMessage()
+
+
+logging.getLogger("uvicorn.access").addFilter(_SuppressHealthAccessLog())
+
 app = mcp.streamable_http_app()
 app.router.routes.append(Route("/health", health, methods=["GET"]))
 app.add_middleware(BearerAuthMiddleware)
