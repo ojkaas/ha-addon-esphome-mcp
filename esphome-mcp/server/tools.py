@@ -1,11 +1,13 @@
 """ESPHome MCP tool implementations.
 
-Build/flash/validate/logs/list are delegated to the ESPHome Device Builder
-dashboard over HTTP/WS (see ``dashboard.py``) so they always run against the
-official ESPHome add-on's current esphome — this add-on ships no toolchain.
+Build/flash/validate/logs/list are routed through ``backend.py``, which picks
+per call between delegating to the ESPHome Device Builder dashboard
+(``dashboard.py``) and running the bundled ``esphome`` CLI (``local.py``),
+according to the ``build_backend`` option. The default delegates so builds run
+against the dashboard's current esphome; the bundled path is the fallback.
 
-File and font tools still operate directly on the shared Home Assistant
-filesystem (``/config/esphome``), which needs no esphome binary.
+File and font tools bypass the backend entirely and operate directly on the
+shared Home Assistant filesystem (``/config/esphome``).
 """
 
 import asyncio
@@ -17,7 +19,7 @@ import os
 import threading
 import time
 
-from . import dashboard
+from . import backend
 
 log = logging.getLogger("esphome-mcp")
 
@@ -93,15 +95,13 @@ def _build_worker(key: str, kind: str, configuration: str, timeout: int) -> None
 
     def on_line(line: str) -> None:
         with _BUILDS_LOCK:
-            job["lines"].append(dashboard.strip_ansi(line))
+            job["lines"].append(backend.strip_ansi(line))
 
     async def _compile() -> int:
-        return await dashboard.stream_spawn("/compile", configuration, on_line)
+        return await backend.compile(configuration, on_line)
 
     async def _upload() -> int:
-        return await dashboard.stream_spawn(
-            "/upload", configuration, on_line, port=dashboard.OTA_PORT
-        )
+        return await backend.upload(configuration, on_line)
 
     async def run() -> int:
         if kind == "flash":
@@ -126,7 +126,7 @@ def _build_worker(key: str, kind: str, configuration: str, timeout: int) -> None
         on_line(f"[killed: exceeded {timeout}s timeout]")
     except Exception as e:  # noqa: BLE001 - surface any transport/dashboard fault
         rc = -1
-        on_line(f"[error contacting dashboard at {dashboard.DASHBOARD_URL}: {e}]")
+        on_line(f"[error contacting build backend ({backend.describe()}): {e}]")
 
     with _BUILDS_LOCK:
         job["returncode"] = rc
@@ -189,9 +189,9 @@ def _await_or_handle(key: str, job: dict, label: str) -> str:
 def list_devices() -> str:
     """List all ESPHome device configurations known to the dashboard."""
     try:
-        data = _run_async(dashboard.list_devices())
+        data = _run_async(backend.list_devices())
     except Exception as e:  # noqa: BLE001
-        return f"Failed to reach dashboard at {dashboard.DASHBOARD_URL}: {e}"
+        return f"Failed to reach build backend ({backend.describe()}): {e}"
 
     configured = data.get("configured", [])
     if not configured:
@@ -210,9 +210,9 @@ def validate(device: str) -> str:
     """Validate an ESPHome device config via the dashboard."""
     configuration = _resolve_device(device)
     try:
-        ok, message = _run_async(dashboard.validate(configuration))
+        ok, message = _run_async(backend.validate(configuration))
     except Exception as e:  # noqa: BLE001
-        return f"Failed to reach dashboard at {dashboard.DASHBOARD_URL}: {e}"
+        return f"Failed to reach build backend ({backend.describe()}): {e}"
     if ok:
         # A valid config streams its entire resolved YAML (hundreds of lines);
         # the caller only needs the verdict, so report success concisely.
@@ -273,14 +273,14 @@ def logs(device: str, num_lines: int = 50) -> str:
 
     try:
         _run_async(
-            dashboard.stream_logs(
+            backend.logs(
                 configuration,
-                lambda line: collected.append(dashboard.strip_ansi(line)),
+                lambda line: collected.append(backend.strip_ansi(line)),
                 max_lines=num_lines,
             )
         )
     except Exception as e:  # noqa: BLE001
-        return f"Failed to stream logs from dashboard at {dashboard.DASHBOARD_URL}: {e}"
+        return f"Failed to stream logs from build backend ({backend.describe()}): {e}"
 
     if not collected:
         return f"No log output captured for {configuration} (device offline?)."

@@ -1,13 +1,13 @@
 name: ESPHome MCP Server
-version: 1.6.1
+version: 1.7.0
 slug: esphome-mcp
 description: >-
-  MCP (Model Context Protocol) server exposing ESPHome operations as tools
-  for Claude Code. Delegates builds/flashes to the ESPHome Device Builder
-  dashboard (official ESPHome add-on) so it always uses current ESPHome, and
-  keeps direct filesystem access to /config/esphome — no SSH, no bundled
-  toolchain.
-url: https://github.com/dmitrii-galantsev/ha-addon-esphome-mcp
+  MCP (Model Context Protocol) server exposing ESPHome operations as tools for
+  Claude Code. By default it delegates builds/flashes to the ESPHome Device
+  Builder dashboard (official ESPHome add-on) so it uses current ESPHome, and
+  falls back to a bundled esphome toolchain when the dashboard is unavailable.
+  Direct filesystem access to /config/esphome — no SSH.
+url: https://github.com/ojkaas/ha-addon-esphome-mcp
 arch:
   - aarch64
   - amd64
@@ -21,10 +21,14 @@ options:
   auth_token: ""
   dashboard_url: "http://127.0.0.1:6052"
   dashboard_token: ""
+  build_backend: "auto"
+  esphome_version: ""
 schema:
   auth_token: str
   dashboard_url: str
   dashboard_token: str
+  build_backend: "list(auto|dashboard|bundled)"
+  esphome_version: "str?"
 startup: application
 boot: auto
 init: false

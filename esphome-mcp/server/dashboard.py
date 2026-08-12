@@ -239,3 +239,36 @@ async def stream_logs(
                         }
                     )
     return 0
+
+
+# ---------------------------------------------------------------------------
+# Uniform backend interface (see backend.py)
+# ---------------------------------------------------------------------------
+async def compile(configuration: str, on_line: Callable[[str], None]) -> int:
+    """Compile *configuration* on the dashboard; stream output to *on_line*."""
+    return await stream_spawn("/compile", configuration, on_line)
+
+
+async def upload(configuration: str, on_line: Callable[[str], None]) -> int:
+    """OTA-flash the last build of *configuration* on the dashboard."""
+    return await stream_spawn("/upload", configuration, on_line, port=OTA_PORT)
+
+
+async def logs(
+    configuration: str, on_line: Callable[[str], None], *, max_lines: int = 50
+) -> int:
+    """Snapshot up to *max_lines* of device logs via the dashboard /ws stream."""
+    return await stream_logs(configuration, on_line, max_lines=max_lines)
+
+
+async def ping(*, timeout: float = 3.0) -> bool:
+    """Return True if the dashboard answers ``GET /devices`` within *timeout*."""
+    try:
+        async with _session() as s:
+            async with s.get(
+                f"{DASHBOARD_URL}/devices",
+                timeout=aiohttp.ClientTimeout(total=timeout),
+            ) as r:
+                return r.status < 500
+    except Exception:  # noqa: BLE001 - any failure means "not reachable"
+        return False
