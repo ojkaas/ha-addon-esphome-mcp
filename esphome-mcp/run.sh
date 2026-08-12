@@ -46,14 +46,23 @@ export MCP_PORT="${MCP_PORT:-8098}"
 # via: ha addons info <esphome-slug> | grep ingress. Token only needed if the
 # dashboard has a password.
 DASHBOARD_URL="$(opt dashboard_url)"
-export DASHBOARD_URL="${DASHBOARD_URL:-http://127.0.0.1:6052}"
+if [ -z "$DASHBOARD_URL" ]; then
+    # Auto-discover the ESPHome Device Builder dashboard's ingress port via the
+    # Supervisor API (needs hassio_api). The port is install-specific and
+    # changes on reinstall, so this beats a hard-coded default. Fall back to the
+    # conventional :6052 if discovery fails.
+    DASHBOARD_URL="$(python3 -m server.discover 2>/dev/null || true)"
+    if [ -n "$DASHBOARD_URL" ]; then
+        echo "[INFO] Auto-discovered ESPHome dashboard at ${DASHBOARD_URL}"
+    else
+        DASHBOARD_URL="http://127.0.0.1:6052"
+        echo "[WARN] Could not auto-discover the ESPHome dashboard (is the ESPHome"
+        echo "[WARN] Device Builder add-on installed?). Falling back to ${DASHBOARD_URL};"
+        echo "[WARN] set dashboard_url manually if delegation fails."
+    fi
+fi
+export DASHBOARD_URL
 export DASHBOARD_TOKEN="$(opt dashboard_token)"
-
-case "$DASHBOARD_URL" in
-    *:6052) echo "[WARN] dashboard_url uses :6052 — the HA ESPHome add-on serves"
-            echo "[WARN] on its ingress port, not 6052. If builds fail to connect,"
-            echo "[WARN] set dashboard_url to http://127.0.0.1:<ingress_port>." ;;
-esac
 
 # Build backend: auto (default) | dashboard | bundled. `auto` delegates to the
 # dashboard when reachable and falls back to the bundled esphome CLI otherwise.

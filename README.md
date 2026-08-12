@@ -13,9 +13,11 @@ required.
 ## Requirements
 
 - The default and `dashboard` backends delegate to the official ESPHome
-  **Device Builder** add-on — install and run it, and point `dashboard_url` at
-  its ingress port. In `auto` mode, if it is not reachable the add-on falls back
-  to its bundled toolchain; in `bundled` mode it is not needed at all.
+  **Device Builder** add-on — install and run it. Leave `dashboard_url` empty
+  and the add-on auto-discovers its ingress port via the Supervisor; set it
+  manually only to override. In `auto` mode, if the dashboard isn't reachable
+  the add-on falls back to its bundled toolchain; in `bundled` mode it isn't
+  needed at all.
 
 ## Quick Start
 
@@ -78,7 +80,9 @@ Build/flash/validate/logs/list are routed by the `build_backend` option:
 
 `esphome_version` pins the version used by the bundled fallback (empty = image
 default; no effect in `dashboard` mode). File/font tools always use direct
-filesystem access and are backend-independent. See
+filesystem access and are backend-independent. The add-on logs the active
+backend (`Build backend -> dashboard|local`) on startup and whenever it changes,
+so the add-on log shows which path a build took. See
 [esphome-mcp/DOCS.md](esphome-mcp/DOCS.md#build-backends) for details.
 
 ## Architecture

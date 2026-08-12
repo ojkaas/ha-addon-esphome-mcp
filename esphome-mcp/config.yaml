@@ -1,5 +1,5 @@
 name: ESPHome MCP Server
-version: 1.7.0
+version: 1.8.0
 slug: esphome-mcp
 description: >-
   MCP (Model Context Protocol) server exposing ESPHome operations as tools for
@@ -19,7 +19,7 @@ map:
   - config:rw
 options:
   auth_token: ""
-  dashboard_url: "http://127.0.0.1:6052"
+  dashboard_url: ""
   dashboard_token: ""
   build_backend: "auto"
   esphome_version: ""
@@ -38,4 +38,9 @@ init: false
 # gets 403. This mirrors how HA core's ESPHome integration reaches it.
 host_network: true
 ingress: false
+# hassio_api lets the add-on query the Supervisor for the ESPHome Device Builder
+# dashboard's ingress port, so dashboard_url can be auto-discovered (see
+# server/discover.py) instead of hard-coded. The port is install-specific and
+# changes on reinstall, so there is no correct fixed default.
+hassio_api: true
 panel_icon: mdi:chip

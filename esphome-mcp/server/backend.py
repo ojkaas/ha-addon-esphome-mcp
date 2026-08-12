@@ -19,15 +19,22 @@ access and depend on neither backend.
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 
 from . import dashboard, local
 from .dashboard import strip_ansi  # re-exported for callers  # noqa: F401
 
+log = logging.getLogger("esphome-mcp")
+
 DASHBOARD = "dashboard"
 LOCAL = "local"
 _VALID_MODES = ("auto", DASHBOARD, "bundled")
+
+# Remember the last backend we logged so we announce it on startup and on every
+# change, without logging the same choice on every single call.
+_last_logged: dict[str, str | None] = {"which": None}
 
 # Cache the dashboard probe briefly so a compile-then-flash sequence doesn't
 # re-probe between steps (and flap backends mid-deploy).
@@ -67,10 +74,21 @@ async def _dashboard_up() -> bool:
 
 
 async def _impl():
-    """Resolve the backend module to use for this call."""
+    """Resolve the backend module to use for this call, logging any change."""
     mode = _mode()
-    up = await _dashboard_up() if mode == "auto" else False
-    return dashboard if choose(mode, up) == DASHBOARD else local
+    up = await _dashboard_up() if mode == "auto" else None
+    which = choose(mode, bool(up))
+    if _last_logged["which"] != which:
+        if mode == "auto":
+            log.info(
+                "Build backend -> %s (mode=auto, dashboard %s)",
+                which,
+                "reachable" if up else "unreachable",
+            )
+        else:
+            log.info("Build backend -> %s (mode=%s)", which, mode)
+        _last_logged["which"] = which
+    return dashboard if which == DASHBOARD else local
 
 
 def describe() -> str:

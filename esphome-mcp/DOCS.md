@@ -44,21 +44,25 @@ auth_token: "my-secret-token"
 
 URL of the ESPHome Device Builder dashboard the add-on delegates builds to.
 
+**Leave this empty (the default) to auto-discover it.** Using its `hassio_api`
+access, the add-on asks the Supervisor for the ESPHome Device Builder add-on's
+current ingress port and uses `http://127.0.0.1:<ingress_port>` — so you don't
+have to look the port up, and it keeps working if that port changes after a
+reinstall. If discovery fails (e.g. the dashboard add-on isn't installed), it
+falls back to `http://127.0.0.1:6052`.
+
 The HA ESPHome add-on serves its dashboard **ingress-only**, bound to
 `127.0.0.1:<ingress_port>` (there is no fixed `6052` listener), and its peer
-guard trusts only loopback and the Supervisor. This add-on therefore runs on
+guard trusts only loopback and the Supervisor. This add-on runs on
 `host_network` so `127.0.0.1` reaches the dashboard as a trusted peer — the
 same path HA core's ESPHome integration uses.
 
-Set this to `http://127.0.0.1:<ingress_port>`. Find the ingress port on the
-ESPHome add-on's page, or from the CLI:
+To pin it manually instead, set `http://127.0.0.1:<ingress_port>`; find the
+ingress port on the ESPHome add-on's page, or from the CLI:
 
 ```bash
 ha addons info <esphome-slug> | grep ingress_port
 ```
-
-The ingress port is stable for an install (it only changes if you reinstall
-the ESPHome add-on).
 
 ### dashboard_token
 

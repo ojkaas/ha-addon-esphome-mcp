@@ -31,6 +31,8 @@ uses direct access to the shared `/config/esphome/` filesystem on the HA host.
       per the `build_backend` option (auto/dashboard/bundled)
     - `dashboard.py` — HTTP/WS client for the Device Builder dashboard
     - `local.py` — bundled `esphome` CLI client (fallback backend)
+    - `discover.py` — resolves the dashboard's ingress port via the Supervisor
+      API when `dashboard_url` is blank (run at startup by `run.sh`)
     - `auth.py` — Bearer token middleware
   - `DOCS.md` — Add-on documentation page shown in HA UI
 
@@ -47,7 +49,9 @@ uses direct access to the shared `/config/esphome/` filesystem on the HA host.
   dashboard ingress-only on `127.0.0.1:<ingress_port>` and its peer guard
   trusts only loopback/Supervisor, so we reach it over loopback (`dashboard_url`
   = `http://127.0.0.1:<ingress_port>`). Bridge networking gets 403; the
-  official `core-esphome` hostname only exists for official add-ons
+  official `core-esphome` hostname only exists for official add-ons.
+  `dashboard_url` defaults to blank → `discover.py` resolves the ingress port
+  from the Supervisor API (`hassio_api: true`), falling back to `:6052`
 - **Builds**: compile/flash consume the dashboard's WS spawn stream in a
   background thread; poll with `esphome_build_status` when a build outlives
   the sync window

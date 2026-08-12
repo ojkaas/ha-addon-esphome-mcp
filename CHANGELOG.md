@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.8.0] - 2026-08-12
+
+### Added
+
+- **Auto-discovery of the ESPHome dashboard URL.** Leave `dashboard_url` empty
+  (now the default) and the add-on resolves the ESPHome Device Builder's current
+  Supervisor ingress port via `hassio_api` (`server/discover.py`), so no manual
+  port is needed and it survives a dashboard reinstall. Falls back to
+  `http://127.0.0.1:6052` if discovery fails.
+- **The active build backend is logged** (`Build backend -> dashboard|local`)
+  on startup and whenever it changes, so the add-on log shows which path a
+  build took.
+
+### Changed
+
+- `dashboard_url` now defaults to empty (auto-discover) instead of
+  `http://127.0.0.1:6052`. Added `hassio_api: true` so the add-on can query the
+  Supervisor for the dashboard's ingress port.
+
 ## [1.7.0] - 2026-08-12
 
 ### Added
