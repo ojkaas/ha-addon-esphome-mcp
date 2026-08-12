@@ -1,0 +1,271 @@
+#!/usr/bin/env python3
+"""esphome-mcp — a thin client for the ESPHome MCP add-on.
+
+Why this exists: pushing/pulling a config *through* an AI assistant is
+expensive because the file's bytes pass through the model's context twice —
+once when it reads the file, once when it re-emits the content as a tool
+argument. This CLI moves the bytes disk<->server directly over HTTP, so the
+assistant only ever emits a short command (``esphome-mcp push esp-lcd.yaml``)
+and never the file body. It also works from a plain shell with no assistant.
+
+It talks to the add-on's MCP Streamable-HTTP endpoint (``/mcp``) using only
+the Python standard library — no venv, no pip.
+
+Connection settings are resolved in this order:
+  1. --url / --token flags
+  2. $ESPHOME_MCP_URL / $ESPHOME_MCP_TOKEN
+  3. a .mcp.json (walked up from --config or the cwd), reading
+     mcpServers.esphome.url and the Bearer token from its Authorization header
+
+Commands:
+  push  FILE...            Upload YAML config files (content read from disk)
+  pull  [NAME...]          Download configs to disk (all if none named)
+  push-font FILE...        Upload font files (base64 handled locally)
+  pull-font [NAME...]      Download fonts to disk
+  ls                       List device configs
+  validate DEVICE          Validate a config (full error output)
+  install  DEVICE          Compile from source then OTA flash (full deploy)
+  call  TOOL [k=v ...]     Call any MCP tool; values parsed as JSON then string
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+DEFAULT_TIMEOUT = 300
+
+
+# ---------------------------------------------------------------------------
+# Connection config
+# ---------------------------------------------------------------------------
+def _find_mcp_json(start: str) -> str | None:
+    """Walk up from *start* looking for a .mcp.json."""
+    d = os.path.abspath(start)
+    while True:
+        candidate = os.path.join(d, ".mcp.json")
+        if os.path.isfile(candidate):
+            return candidate
+        parent = os.path.dirname(d)
+        if parent == d:
+            return None
+        d = parent
+
+
+def resolve_conn(args) -> tuple[str, str]:
+    """Return (url, token) from flags, env, or a discovered .mcp.json."""
+    url = args.url or os.environ.get("ESPHOME_MCP_URL")
+    token = args.token or os.environ.get("ESPHOME_MCP_TOKEN")
+    if url and token is not None:
+        return url, token
+
+    path = args.config or _find_mcp_json(os.getcwd())
+    if path and os.path.isfile(path):
+        try:
+            cfg = json.load(open(path, encoding="utf-8"))
+            server = cfg.get("mcpServers", {}).get("esphome", {})
+            url = url or server.get("url")
+            if token is None:
+                auth = server.get("headers", {}).get("Authorization", "")
+                if auth.startswith("Bearer "):
+                    token = auth[len("Bearer "):]
+        except (OSError, ValueError) as e:
+            print(f"warning: could not read {path}: {e}", file=sys.stderr)
+
+    if not url:
+        sys.exit(
+            "error: no MCP url. Set --url, $ESPHOME_MCP_URL, or a .mcp.json "
+            "with mcpServers.esphome.url"
+        )
+    return url, token or ""
+
+
+# ---------------------------------------------------------------------------
+# MCP Streamable-HTTP transport (stdlib only)
+# ---------------------------------------------------------------------------
+def _parse_sse_or_json(body: str) -> dict:
+    """Parse a response that's either raw JSON or SSE ``data:`` frames."""
+    body = body.strip()
+    if body.startswith("{"):
+        return json.loads(body)
+    for line in body.splitlines():
+        line = line.strip()
+        if line.startswith("data:"):
+            payload = line[len("data:"):].strip()
+            if payload.startswith("{"):
+                return json.loads(payload)
+    raise ValueError(f"unrecognized MCP response:\n{body[:500]}")
+
+
+def call_tool(url: str, token: str, name: str, arguments: dict, timeout: int) -> str:
+    """Invoke an MCP tool and return its text content (the tool's string result)."""
+    req_body = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": name, "arguments": arguments},
+        }
+    ).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    req = urllib.request.Request(url, data=req_body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "replace")[:500]
+        sys.exit(f"error: HTTP {e.code} from {url}\n{detail}")
+    except urllib.error.URLError as e:
+        sys.exit(f"error: cannot reach {url}: {e.reason}")
+
+    msg = _parse_sse_or_json(raw)
+    if "error" in msg:
+        sys.exit(f"error: MCP {name} failed: {msg['error']}")
+    result = msg.get("result", {})
+    if result.get("isError"):
+        parts = [c.get("text", "") for c in result.get("content", [])]
+        sys.exit("error: " + "\n".join(parts))
+    # Prefer structured output, else the text content block.
+    structured = result.get("structuredContent")
+    if isinstance(structured, dict) and "result" in structured:
+        return structured["result"]
+    for block in result.get("content", []):
+        if block.get("type") == "text":
+            return block.get("text", "")
+    return json.dumps(result)
+
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+def cmd_push(url, token, args) -> None:
+    files: dict[str, str] = {}
+    for path in args.files:
+        name = args.name or os.path.basename(path)
+        with open(path, encoding="utf-8") as f:
+            files[name] = f.read()
+    print(call_tool(url, token, "esphome_push_files", {"files": files}, args.timeout))
+
+
+def cmd_pull(url, token, args) -> None:
+    arguments = {"filenames": args.names} if args.names else {}
+    out = call_tool(url, token, "esphome_pull_files", arguments, args.timeout)
+    data = json.loads(out)
+    os.makedirs(args.dest, exist_ok=True)
+    for name, content in data.items():
+        target = os.path.join(args.dest, name)
+        os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+        with open(target, "w", encoding="utf-8", newline="\n") as f:
+            f.write(content)
+        print(f"{target}: {len(content)} bytes")
+
+
+def cmd_push_font(url, token, args) -> None:
+    files: dict[str, str] = {}
+    for path in args.files:
+        with open(path, "rb") as f:
+            files[os.path.basename(path)] = base64.b64encode(f.read()).decode("ascii")
+    print(call_tool(url, token, "esphome_push_fonts", {"files": files}, args.timeout))
+
+
+def cmd_pull_font(url, token, args) -> None:
+    arguments = {"filenames": args.names} if args.names else {}
+    out = call_tool(url, token, "esphome_pull_fonts", arguments, args.timeout)
+    data = json.loads(out)
+    os.makedirs(args.dest, exist_ok=True)
+    for name, b64 in data.items():
+        target = os.path.join(args.dest, name)
+        with open(target, "wb") as f:
+            f.write(base64.b64decode(b64))
+        print(f"{target}: {os.path.getsize(target)} bytes")
+
+
+def cmd_ls(url, token, args) -> None:
+    print(call_tool(url, token, "esphome_list_devices", {}, args.timeout))
+
+
+def cmd_validate(url, token, args) -> None:
+    print(call_tool(url, token, "esphome_validate", {"device": args.device}, args.timeout))
+
+
+def cmd_install(url, token, args) -> None:
+    print(call_tool(url, token, "esphome_install", {"device": args.device}, args.timeout))
+
+
+def cmd_call(url, token, args) -> None:
+    arguments = {}
+    for pair in args.kv:
+        key, _, val = pair.partition("=")
+        try:
+            arguments[key] = json.loads(val)
+        except ValueError:
+            arguments[key] = val
+    print(call_tool(url, token, args.tool, arguments, args.timeout))
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+def main() -> None:
+    p = argparse.ArgumentParser(prog="esphome-mcp", description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--url", help="MCP endpoint URL (…/mcp)")
+    p.add_argument("--token", help="Bearer token")
+    p.add_argument("--config", help="path to a .mcp.json to read url/token from")
+    p.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
+                   help=f"request timeout seconds (default {DEFAULT_TIMEOUT})")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    sp = sub.add_parser("push", help="upload YAML config files")
+    sp.add_argument("files", nargs="+")
+    sp.add_argument("--name", help="override remote filename (single file only)")
+    sp.set_defaults(func=cmd_push)
+
+    sp = sub.add_parser("pull", help="download configs to disk")
+    sp.add_argument("names", nargs="*")
+    sp.add_argument("--dest", default=".", help="destination dir (default .)")
+    sp.set_defaults(func=cmd_pull)
+
+    sp = sub.add_parser("push-font", help="upload font files")
+    sp.add_argument("files", nargs="+")
+    sp.set_defaults(func=cmd_push_font)
+
+    sp = sub.add_parser("pull-font", help="download fonts to disk")
+    sp.add_argument("names", nargs="*")
+    sp.add_argument("--dest", default="fonts", help="destination dir (default fonts)")
+    sp.set_defaults(func=cmd_pull_font)
+
+    sp = sub.add_parser("ls", help="list device configs")
+    sp.set_defaults(func=cmd_ls)
+
+    sp = sub.add_parser("validate", help="validate a config")
+    sp.add_argument("device")
+    sp.set_defaults(func=cmd_validate)
+
+    sp = sub.add_parser("install", help="compile from source then OTA flash (deploy)")
+    sp.add_argument("device")
+    sp.set_defaults(func=cmd_install)
+
+    sp = sub.add_parser("call", help="call any MCP tool: TOOL k=v ...")
+    sp.add_argument("tool")
+    sp.add_argument("kv", nargs="*")
+    sp.set_defaults(func=cmd_call)
+
+    args = p.parse_args()
+    url, token = resolve_conn(args)
+    args.func(url, token, args)
+
+
+if __name__ == "__main__":
+    main()

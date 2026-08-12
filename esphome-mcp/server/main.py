@@ -48,7 +48,11 @@ def esphome_validate(device: str) -> str:
 
 @mcp.tool()
 def esphome_compile(device: str) -> str:
-    """Compile ESPHome firmware for a device.
+    """Compile firmware from the current YAML WITHOUT flashing it.
+
+    Use this to check that a config builds. To actually deploy it to the
+    device, use esphome_install (compile + flash) instead of compiling and
+    then flashing separately.
 
     The build runs in the background. If it finishes quickly the full output
     is returned inline; if it takes longer than the sync window, a pollable
@@ -61,11 +65,40 @@ def esphome_compile(device: str) -> str:
 
 
 @mcp.tool()
-def esphome_flash(device: str) -> str:
-    """OTA flash a device.
+def esphome_install(device: str) -> str:
+    """Deploy the current YAML: COMPILE from source, then OTA flash.
 
-    Like esphome_compile, this runs in the background and may return a
-    pollable handle for long uploads — check esphome_build_status(device).
+    THIS IS ALMOST ALWAYS THE TOOL YOU WANT after editing a config. It
+    rebuilds the firmware from the current YAML and only flashes if that
+    compile succeeds, so the device always runs the latest config.
+
+    Prefer this over esphome_flash whenever the YAML may have changed. Use the
+    bare esphome_flash ONLY to re-push an already-built binary without
+    rebuilding (rare).
+
+    Runs in the background and may return a pollable handle — check progress
+    with esphome_build_status(device).
+
+    Args:
+        device: Device name (e.g. 'statusdisplay') or YAML filename.
+    """
+    return tools.install(device)
+
+
+@mcp.tool()
+def esphome_flash(device: str) -> str:
+    """Flash the LAST-COMPILED firmware WITHOUT rebuilding it first.
+
+    WARNING: this uploads the existing/old firmware.bin from the previous
+    compile. It does NOT pick up any YAML changes. If you edited the config,
+    this will flash a STALE binary. To deploy config changes, use
+    esphome_install (compile + flash) instead.
+
+    Only use this to re-push an already-built binary (e.g. a flash that failed
+    mid-upload but the compile was fine).
+
+    Runs in the background and may return a pollable handle — check progress
+    with esphome_build_status(device).
 
     Args:
         device: Device name (e.g. 'statusdisplay') or YAML filename.
@@ -101,9 +134,19 @@ def esphome_logs(device: str, num_lines: int = 50) -> str:
 
 @mcp.tool()
 def esphome_push_files(files: dict[str, str]) -> str:
-    """Push YAML config files to the ESPHome directory on Home Assistant.
+    """Write YAML config files to /config/esphome/ (content passed inline).
 
-    Writes files to /config/esphome/. Rejects secrets.yaml.
+    COST WARNING: this takes the full file CONTENT as an argument, which means
+    reading the file into context and re-emitting it here — the bytes cross the
+    model context twice. For anything but a tiny snippet, prefer the companion
+    CLI, which reads the file from disk and uploads it without the content ever
+    entering context:
+
+        esphome-mcp push <file.yaml>
+
+    Use this tool only when that CLI is unavailable, or for content you are
+    generating inline anyway (not reading from a local file). Rejects
+    secrets.yaml.
 
     Args:
         files: Dict mapping filename to YAML content.
@@ -114,9 +157,16 @@ def esphome_push_files(files: dict[str, str]) -> str:
 
 @mcp.tool()
 def esphome_pull_files(filenames: list[str] | None = None) -> str:
-    """Pull YAML config files from the ESPHome directory on Home Assistant.
+    """Read YAML config files from /config/esphome/ (content returned inline).
 
-    Returns file contents. Excludes secrets.yaml.
+    COST WARNING: this returns the full file CONTENT into context. If the goal
+    is to get files onto local disk, prefer the companion CLI, which writes them
+    straight to disk without the content entering context:
+
+        esphome-mcp pull [name...]
+
+    Use this tool only when you actually need to inspect the content in the
+    conversation, or when that CLI is unavailable. Excludes secrets.yaml.
 
     Args:
         filenames: Optional list of filenames to pull.

@@ -1,17 +1,30 @@
 # ESPHome MCP Server
 
 This add-on runs an MCP (Model Context Protocol) server that exposes
-ESPHome operations as tools for Claude Code. It runs directly on your
-Home Assistant instance with native filesystem access to
-`/config/esphome/` — no SSH tunneling required.
+ESPHome operations as tools for Claude Code. It delegates builds, flashes,
+validation and logs to the ESPHome Device Builder dashboard (the official
+ESPHome add-on) so they always run against **current** ESPHome, and keeps
+native filesystem access to `/config/esphome/` for config/font transfer —
+no SSH tunneling required.
 
 ## Architecture
 
 ```text
-Claude Code (desktop)  --HTTP-->  HA Add-on (MCP Server)  --local-->  ESPHome CLI
-                                       |
-                                  /config/esphome/  (direct filesystem access)
+Claude Code (desktop)
+     |  HTTP (MCP, port 8098, Bearer token)
+     v
+HA Add-on (MCP Server, host_network)
+     |  HTTP/WS  -->  ESPHome Device Builder dashboard (127.0.0.1:<ingress_port>)
+     |                    - GET /devices
+     |                    - WS /compile, WS /upload
+     |                    - WS /ws (devices/validate, devices/logs)
+     |  local file I/O
+     v
+/config/esphome/  (shared mount: push/pull YAML + fonts)
 ```
+
+Because compilation happens in the ESPHome add-on's container, this add-on
+ships **no** ESPHome toolchain and is not tied to any esphome version.
 
 ## Configuration
 
@@ -20,17 +33,40 @@ Claude Code (desktop)  --HTTP-->  HA Add-on (MCP Server)  --local-->  ESPHome CL
 An authentication token to secure the MCP endpoint. If left empty, a
 token is auto-generated on first start and printed in the add-on logs.
 
-You can set your own token in the add-on configuration:
-
 ```yaml
 auth_token: "my-secret-token"
 ```
+
+### dashboard_url
+
+URL of the ESPHome Device Builder dashboard the add-on delegates builds to.
+
+The HA ESPHome add-on serves its dashboard **ingress-only**, bound to
+`127.0.0.1:<ingress_port>` (there is no fixed `6052` listener), and its peer
+guard trusts only loopback and the Supervisor. This add-on therefore runs on
+`host_network` so `127.0.0.1` reaches the dashboard as a trusted peer — the
+same path HA core's ESPHome integration uses.
+
+Set this to `http://127.0.0.1:<ingress_port>`. Find the ingress port on the
+ESPHome add-on's page, or from the CLI:
+
+```bash
+ha addons info <esphome-slug> | grep ingress_port
+```
+
+The ingress port is stable for an install (it only changes if you reinstall
+the ESPHome add-on).
+
+### dashboard_token
+
+Only needed if the dashboard is protected with a password. Leave empty for
+the default (open) HA add-on behind Ingress.
 
 ## Setup
 
 1. Add this repository as a custom add-on repository in Home Assistant:
    **Settings > Add-ons > Add-on Store > ... > Repositories**
-   Enter: `https://github.com/bberrevoets/ha-addon-esphome-mcp`
+   Enter: `https://github.com/dmitrii-galantsev/ha-addon-esphome-mcp`
 
 2. Install the **ESPHome MCP Server** add-on and start it.
 
@@ -63,14 +99,47 @@ auth_token: "my-secret-token"
 | ---- | ----------- |
 | `esphome_list_devices` | List device configs with names |
 | `esphome_validate` | Validate a device YAML config |
-| `esphome_compile` | Compile firmware (background; returns inline or a poll handle) |
-| `esphome_flash` | OTA flash a device (background; returns inline or a poll handle) |
-| `esphome_build_status` | Poll the latest background compile/flash for a device |
+| `esphome_compile` | Compile firmware from source, no flash (background) |
+| `esphome_install` | **Compile + OTA flash** — deploy the current YAML (background) |
+| `esphome_flash` | OTA flash the **last-compiled** binary without rebuilding (background) |
+| `esphome_build_status` | Poll the latest background build for a device |
 | `esphome_logs` | Get recent device logs (snapshot) |
 | `esphome_push_files` | Write YAML files to the config directory |
 | `esphome_pull_files` | Read YAML files from the config directory |
 | `esphome_push_fonts` | Write font files (base64-encoded) |
 | `esphome_pull_fonts` | Read font files (base64-encoded) |
+
+## CLI: cheap push/pull (`scripts/esphome-mcp`)
+
+Pushing or pulling a config *through* an AI assistant is expensive: the file's
+bytes pass through the model's context twice — once when it reads the file and
+again when it re-emits the content as the `esphome_push_files` argument. For a
+large YAML that is a lot of wasted tokens.
+
+`scripts/esphome-mcp` is a stdlib-only client that moves the bytes
+disk↔server directly over the MCP HTTP endpoint, so the file content never
+enters the assistant's context — the assistant only emits a short command.
+It also works from a plain shell with no assistant at all.
+
+```bash
+# Put it on PATH (once):
+ln -sf "$PWD/scripts/esphome-mcp" ~/.local/bin/esphome-mcp
+
+# It auto-reads url+token from a .mcp.json in the current dir tree,
+# or use $ESPHOME_MCP_URL / $ESPHOME_MCP_TOKEN, or --url/--token.
+esphome-mcp push esp-lcd.yaml          # upload (content read from disk)
+esphome-mcp pull esp-lcd.yaml          # download to disk
+esphome-mcp pull                       # download all configs
+esphome-mcp ls                         # list devices
+esphome-mcp validate esp-lcd           # full validation output
+esphome-mcp install esp-lcd            # compile + OTA flash (deploy changes)
+esphome-mcp push-font myfont.ttf       # fonts (base64 handled locally)
+esphome-mcp call <tool> k=v ...        # call any MCP tool directly
+```
+
+In an assistant session, prefer this CLI (via a `/push` slash command or a
+`Bash(esphome-mcp:*)` call) over the `esphome_push_files` MCP tool whenever the
+file is large.
 
 ## Security
 
@@ -84,9 +153,26 @@ auth_token: "my-secret-token"
 The add-on listens on port **8098** (TCP). Make sure this port is
 accessible from your development machine.
 
+## Deploying config changes: install vs flash
+
+These three tools are easy to confuse:
+
+- **`esphome_compile`** builds firmware from the current YAML but does *not*
+  flash it.
+- **`esphome_flash`** OTA-uploads the *last-compiled* `firmware.bin` — it does
+  *not* rebuild. If you edited the YAML and call this, you flash a **stale**
+  binary that lacks your changes.
+- **`esphome_install`** does both: compile from source, then flash — and only
+  flashes if the compile succeeds. This is what you want after editing a
+  config.
+
+Rule of thumb: **to deploy YAML changes, use `esphome_install`.** Reach for the
+bare `esphome_flash` only to re-push an already-built binary (e.g. an upload
+that failed after a good compile).
+
 ## Long-running builds
 
-Compiles (and the compile step of a flash) can take several minutes,
+Compiles (and the compile step of an install) can take several minutes,
 especially the first build of a device. These run in the background: if a
 build finishes within ~45s the full output is returned immediately;
 otherwise the tool returns a handle and you poll `esphome_build_status`

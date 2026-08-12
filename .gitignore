@@ -4,3 +4,5 @@ __pycache__/
 .venv/
 .env
 .claude/
+# Local MCP endpoint + token — never commit
+.mcp.json

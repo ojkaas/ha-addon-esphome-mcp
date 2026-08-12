@@ -3,8 +3,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 MCP (Model Context Protocol) server that exposes ESPHome operations as
-tools for [Claude Code](https://claude.ai/code). Runs as a Home
-Assistant add-on with direct filesystem access — no SSH required.
+tools for [Claude Code](https://claude.ai/code). Runs as a Home Assistant
+add-on that delegates builds/flashes to the ESPHome Device Builder dashboard
+(so they always use current ESPHome) and shares the `/config/esphome/`
+filesystem for config/font transfer — no SSH required.
 
 ## Quick Start
 
@@ -13,7 +15,7 @@ Assistant add-on with direct filesystem access — no SSH required.
    **Settings > Add-ons > Add-on Store > ... (menu) > Repositories**
 
    ```text
-   https://github.com/bberrevoets/ha-addon-esphome-mcp
+   https://github.com/dmitrii-galantsev/ha-addon-esphome-mcp
    ```
 
 2. Install and start the **ESPHome MCP Server** add-on.
@@ -48,6 +50,7 @@ Assistant add-on with direct filesystem access — no SSH required.
 | `esphome_validate` | Validate a device YAML config |
 | `esphome_compile` | Compile firmware for a device |
 | `esphome_flash` | OTA flash a device |
+| `esphome_build_status` | Poll a background compile/flash |
 | `esphome_logs` | Get recent device logs |
 | `esphome_push_files` | Write YAML configs to HA |
 | `esphome_pull_files` | Read YAML configs from HA |
@@ -57,13 +60,16 @@ Assistant add-on with direct filesystem access — no SSH required.
 ## Architecture
 
 ```text
-Claude Code (desktop)  --HTTP-->  HA Add-on (MCP Server)  --local-->  ESPHome CLI
-                                       |
-                                  /config/esphome/  (direct filesystem access)
+Claude Code (desktop)
+     |  HTTP (MCP, Bearer token, port 8098)
+     v
+HA Add-on (MCP Server, host_network)
+     |  HTTP/WS  -->  ESPHome Device Builder dashboard (builds/flash/validate/logs)
+     |  local file I/O  -->  /config/esphome/  (push/pull YAML + fonts)
 ```
 
 See [esphome-mcp/DOCS.md](esphome-mcp/DOCS.md) for full documentation.
 
 ## License
 
-[MIT](LICENSE) — Berrevoets Systems
+[MIT](LICENSE)
